@@ -12,6 +12,11 @@ type UploadJob = {
   lastName: string;
 };
 
+type AudioAsset = {
+  name: string;
+  url: string;
+};
+
 type Resolution = {
   label: string;
   width: number;
@@ -52,10 +57,14 @@ const safeError = (error: unknown) => (error instanceof Error ? error.message : 
 
 export const App: React.FC = () => {
   const [job, setJob] = useState<UploadJob | null>(null);
+  const [audio, setAudio] = useState<AudioAsset | null>(null);
+  const [audioVolume, setAudioVolume] = useState(1);
+  const [audioLoop, setAudioLoop] = useState(false);
   const [fps, setFps] = useState(24);
   const [resolutionIndex, setResolutionIndex] = useState(0);
   const [fit, setFit] = useState<'contain' | 'cover'>('contain');
   const [loadingZip, setLoadingZip] = useState(false);
+  const [loadingAudio, setLoadingAudio] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [render, setRender] = useState<RenderState>({status: 'idle', progress: 0});
 
@@ -68,8 +77,11 @@ export const App: React.FC = () => {
       frames: job?.frames ?? [],
       fit,
       backgroundColor: '#000000',
+      audioSrc: audio?.url ?? null,
+      audioVolume,
+      audioLoop,
     }),
-    [job, fit],
+    [job, fit, audio, audioVolume, audioLoop],
   );
 
   const chooseZip = async () => {
@@ -85,11 +97,44 @@ export const App: React.FC = () => {
       if (picked.cancelled) return;
       if (job) await window.frameRunner.releaseJob(job.jobId);
       setJob(picked);
+      setAudio(null);
+      setAudioVolume(1);
+      setAudioLoop(false);
       setRender({status: 'idle', progress: 0});
     } catch (pickError) {
       setError(safeError(pickError));
     } finally {
       setLoadingZip(false);
+    }
+  };
+
+  const chooseAudio = async () => {
+    if (!job || renderActive) return;
+    setLoadingAudio(true);
+    setError(null);
+    try {
+      const picked = await window.frameRunner.pickAudio(job.jobId);
+      if (picked.cancelled) return;
+      setAudio({name: picked.name, url: picked.url});
+      setRender({status: 'idle', progress: 0});
+    } catch (pickError) {
+      setError(safeError(pickError));
+    } finally {
+      setLoadingAudio(false);
+    }
+  };
+
+  const removeAudio = async () => {
+    if (!job || !audio || renderActive) return;
+    setError(null);
+    try {
+      await window.frameRunner.clearAudio(job.jobId);
+      setAudio(null);
+      setAudioLoop(false);
+      setAudioVolume(1);
+      setRender({status: 'idle', progress: 0});
+    } catch (removeError) {
+      setError(safeError(removeError));
     }
   };
 
@@ -102,6 +147,9 @@ export const App: React.FC = () => {
       }
     }
     setJob(null);
+    setAudio(null);
+    setAudioVolume(1);
+    setAudioLoop(false);
     setRender({status: 'idle', progress: 0});
     setError(null);
   };
@@ -148,7 +196,9 @@ export const App: React.FC = () => {
         inputProps,
         container: 'mp4',
         videoCodec: 'h264',
-        muted: true,
+        muted: audio === null,
+        audioCodec: audio ? 'aac' : undefined,
+        audioBitrate: audio ? 'high' : undefined,
         videoBitrate: 'high',
         hardwareAcceleration: 'no-preference',
         pageResponsiveness: 'medium',
@@ -185,7 +235,7 @@ export const App: React.FC = () => {
         <div>
           <p className="eyebrow">DESKTOP VIDEO UTILITY</p>
           <h1>Frame Runner</h1>
-          <p className="subtitle">Choose an image ZIP, set FPS, preview the sequence, and save a real MP4. One image equals one frame.</p>
+          <p className="subtitle">Choose an image ZIP, add an optional soundtrack, set FPS, preview everything in sync, and save a real MP4. One image equals one frame.</p>
         </div>
         {job ? (
           <button className="ghost-button" type="button" onClick={reset} disabled={renderActive}>
@@ -209,7 +259,7 @@ export const App: React.FC = () => {
             <div className="section-heading">
               <div>
                 <p className="eyebrow">PREVIEW</p>
-                <h2>Image sequence</h2>
+                <h2>Image sequence{audio ? ' + sound' : ''}</h2>
               </div>
               <span className="status-pill">{job.frameCount.toLocaleString()} frames</span>
             </div>
@@ -296,6 +346,64 @@ export const App: React.FC = () => {
               </select>
             </label>
 
+            <section className="audio-section" aria-label="Soundtrack settings">
+              <div className="audio-heading">
+                <div>
+                  <span className="control-label">Soundtrack</span>
+                  <small>Optional</small>
+                </div>
+                {audio ? (
+                  <button className="text-button" type="button" disabled={renderActive} onClick={() => void removeAudio()}>
+                    Remove
+                  </button>
+                ) : null}
+              </div>
+
+              {audio ? (
+                <>
+                  <div className="audio-file-row">
+                    <div className="audio-mark" aria-hidden="true">♪</div>
+                    <div className="audio-file-copy">
+                      <strong title={audio.name}>{audio.name}</strong>
+                      <span>Included in preview and MP4</span>
+                    </div>
+                    <button className="small-button" type="button" disabled={renderActive || loadingAudio} onClick={() => void chooseAudio()}>
+                      {loadingAudio ? 'Loading…' : 'Replace'}
+                    </button>
+                  </div>
+
+                  <label className="audio-volume">
+                    <span>Volume <strong>{Math.round(audioVolume * 100)}%</strong></span>
+                    <input
+                      type="range"
+                      min={0}
+                      max={1}
+                      step={0.05}
+                      value={audioVolume}
+                      disabled={renderActive}
+                      onChange={(event) => setAudioVolume(Number(event.target.value))}
+                    />
+                  </label>
+
+                  <label className="loop-row">
+                    <input
+                      type="checkbox"
+                      checked={audioLoop}
+                      disabled={renderActive}
+                      onChange={(event) => setAudioLoop(event.target.checked)}
+                    />
+                    <span>Loop soundtrack if it ends before the video</span>
+                  </label>
+                </>
+              ) : (
+                <button className="audio-button" type="button" disabled={renderActive || loadingAudio} onClick={() => void chooseAudio()}>
+                  {loadingAudio ? 'Loading audio…' : 'Choose audio file'}
+                </button>
+              )}
+
+              <p className="audio-help">MP3, WAV, M4A, AAC, OGG, or FLAC. Audio starts at 00:00 and is automatically cut when the video ends.</p>
+            </section>
+
             <div className="stats-grid">
               <div>
                 <span>Frames</span>
@@ -310,8 +418,8 @@ export const App: React.FC = () => {
                 <strong>{fps}</strong>
               </div>
               <div>
-                <span>Output</span>
-                <strong>{resolution.width}×{resolution.height}</strong>
+                <span>Audio</span>
+                <strong>{audio ? 'On' : 'None'}</strong>
               </div>
             </div>
 
@@ -337,7 +445,7 @@ export const App: React.FC = () => {
               {renderActive ? 'Rendering…' : 'Render & Save MP4'}
             </button>
 
-            <p className="fine-print">Changing FPS changes playback speed and duration. Rendering happens locally on this computer.</p>
+            <p className="fine-print">Changing FPS changes playback speed and video duration. Sound stays anchored to the video timeline. Rendering happens locally on this computer.</p>
           </aside>
         </div>
       )}

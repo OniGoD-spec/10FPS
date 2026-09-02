@@ -144,7 +144,10 @@ h2 {
 .render-button,
 .download-button,
 .ghost-button,
-.preset {
+.preset,
+.audio-button,
+.small-button,
+.text-button {
   border: 0;
   border-radius: 12px;
   cursor: pointer;
@@ -250,7 +253,8 @@ h2 {
 
 .sequence-meta span,
 .stats-grid span,
-.field > span {
+.field > span,
+.control-label {
   display: block;
   margin-bottom: 6px;
   color: #878f9f;
@@ -310,6 +314,165 @@ h2 {
   border-color: #656cf0;
   background: #292d63;
   color: #eef0ff;
+}
+
+.audio-section {
+  margin-top: 2px;
+  border: 1px solid #282e3b;
+  border-radius: 14px;
+  background: #10141c;
+  padding: 14px;
+}
+
+.audio-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.audio-heading > div {
+  min-width: 0;
+}
+
+.audio-heading .control-label {
+  margin-bottom: 2px;
+}
+
+.audio-heading small {
+  color: #6f7786;
+  font-size: 11px;
+}
+
+.audio-button {
+  width: 100%;
+  min-height: 44px;
+  border: 1px solid #363d4d;
+  background: #171c26;
+  color: #dfe2e9;
+  font-weight: 750;
+}
+
+.audio-button:hover,
+.small-button:hover {
+  background: #202633;
+  border-color: #50586b;
+}
+
+.audio-file-row {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.audio-mark {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border: 1px solid #343b4c;
+  border-radius: 10px;
+  background: #1a1f2b;
+  color: #cfd3ff;
+  font-size: 19px;
+}
+
+.audio-file-copy {
+  min-width: 0;
+}
+
+.audio-file-copy strong,
+.audio-file-copy span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.audio-file-copy strong {
+  color: #e5e7ec;
+  font-size: 12px;
+}
+
+.audio-file-copy span {
+  margin-top: 3px;
+  color: #7d8594;
+  font-size: 10px;
+}
+
+.small-button {
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid #343b4c;
+  background: #171c26;
+  color: #bcc2ce;
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.text-button {
+  padding: 5px 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #9ba3b3;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.text-button:hover {
+  color: #e1e4eb;
+}
+
+.audio-volume {
+  display: block;
+  margin-top: 15px;
+}
+
+.audio-volume > span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 7px;
+  color: #8f97a7;
+  font-size: 11px;
+}
+
+.audio-volume > span strong {
+  color: #cfd3dc;
+}
+
+.audio-volume input[type='range'] {
+  width: 100%;
+  accent-color: #747bff;
+}
+
+.loop-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin-top: 13px;
+  color: #a7aeba;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.loop-row input {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: #747bff;
+}
+
+.audio-help {
+  margin: 12px 0 0;
+  color: #6f7786;
+  font-size: 10px;
+  line-height: 1.5;
 }
 
 .stats-grid {
@@ -436,5 +599,14 @@ h2 {
   .sequence-meta,
   .stats-grid {
     grid-template-columns: 1fr;
+  }
+
+  .audio-file-row {
+    grid-template-columns: 36px minmax(0, 1fr);
+  }
+
+  .audio-file-row .small-button {
+    grid-column: 1 / -1;
+    width: 100%;
   }
 }

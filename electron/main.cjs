@@ -2,16 +2,18 @@ const {app, BrowserWindow, dialog, ipcMain} = require('electron');
 const express = require('express');
 const {createServer} = require('node:http');
 const {createWriteStream} = require('node:fs');
-const {mkdir, open, rm, stat} = require('node:fs/promises');
+const {copyFile, mkdir, open, rm, stat} = require('node:fs/promises');
 const {pipeline} = require('node:stream/promises');
 const {randomUUID} = require('node:crypto');
 const path = require('node:path');
 const yauzl = require('yauzl');
 
 const SUPPORTED_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp']);
+const SUPPORTED_AUDIO_EXTENSIONS = new Set(['.mp3', '.wav', '.m4a', '.aac', '.ogg', '.flac']);
 const MAX_FRAMES = 100000;
 const MAX_ZIP_BYTES = 8 * 1024 * 1024 * 1024;
 const MAX_UNCOMPRESSED_BYTES = 32 * 1024 * 1024 * 1024;
+const MAX_AUDIO_BYTES = 4 * 1024 * 1024 * 1024;
 const naturalCollator = new Intl.Collator(undefined, {numeric: true, sensitivity: 'base'});
 
 let server;
@@ -140,6 +142,44 @@ const extractZip = async (zipPath) => {
   }
 };
 
+const pickAudioForJob = async (jobId) => {
+  const job = jobs.get(jobId);
+  if (!job) throw new Error('Choose an image ZIP before adding audio.');
+
+  const result = await dialog.showOpenDialog({
+    title: 'Choose soundtrack',
+    properties: ['openFile'],
+    filters: [
+      {name: 'Audio files', extensions: ['mp3', 'wav', 'm4a', 'aac', 'ogg', 'flac']},
+      {name: 'All files', extensions: ['*']},
+    ],
+  });
+  if (result.canceled || result.filePaths.length === 0) return {cancelled: true};
+
+  const audioPath = result.filePaths[0];
+  const extension = path.extname(audioPath).toLowerCase();
+  if (!SUPPORTED_AUDIO_EXTENSIONS.has(extension)) {
+    throw new Error('Unsupported audio format. Use MP3, WAV, M4A, AAC, OGG, or FLAC.');
+  }
+
+  const audioStats = await stat(audioPath);
+  if (audioStats.size > MAX_AUDIO_BYTES) {
+    throw new Error('Audio file is larger than the 4 GB desktop safety limit.');
+  }
+
+  const audioDir = path.join(job.dir, 'audio');
+  await rm(audioDir, {recursive: true, force: true});
+  await mkdir(audioDir, {recursive: true});
+  const audioFile = `soundtrack${extension}`;
+  await copyFile(audioPath, path.join(audioDir, audioFile));
+
+  return {
+    cancelled: false,
+    name: path.basename(audioPath),
+    url: `${serverOrigin}/frames/${jobId}/audio/${encodeURIComponent(audioFile)}`,
+  };
+};
+
 const registerIpc = () => {
   ipcMain.handle('frame-runner:pick-zip', async () => {
     const result = await dialog.showOpenDialog({
@@ -153,6 +193,22 @@ const registerIpc = () => {
     } catch (error) {
       throw new Error(`Could not open ZIP: ${safeMessage(error)}`);
     }
+  });
+
+  ipcMain.handle('frame-runner:pick-audio', async (_event, jobId) => {
+    if (typeof jobId !== 'string') throw new Error('Invalid image job.');
+    try {
+      return await pickAudioForJob(jobId);
+    } catch (error) {
+      throw new Error(`Could not add audio: ${safeMessage(error)}`);
+    }
+  });
+
+  ipcMain.handle('frame-runner:clear-audio', async (_event, jobId) => {
+    if (typeof jobId !== 'string') return;
+    const job = jobs.get(jobId);
+    if (!job) return;
+    await rm(path.join(job.dir, 'audio'), {recursive: true, force: true});
   });
 
   ipcMain.handle('frame-runner:release-job', async (_event, jobId) => {
