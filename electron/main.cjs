@@ -6,11 +6,12 @@ const {mkdir, open, rm, stat} = require('node:fs/promises');
 const {pipeline} = require('node:stream/promises');
 const {randomUUID} = require('node:crypto');
 const path = require('node:path');
-const unzipper = require('unzipper');
+const yauzl = require('yauzl');
 
 const SUPPORTED_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp']);
 const MAX_FRAMES = 100000;
 const MAX_ZIP_BYTES = 8 * 1024 * 1024 * 1024;
+const MAX_UNCOMPRESSED_BYTES = 32 * 1024 * 1024 * 1024;
 const naturalCollator = new Intl.Collator(undefined, {numeric: true, sensitivity: 'base'});
 
 let server;
@@ -68,54 +69,74 @@ const extractZip = async (zipPath) => {
     throw new Error('ZIP is larger than the 8 GB desktop safety limit.');
   }
 
-  const archive = await unzipper.Open.file(zipPath);
-  const entries = archive.files
-    .filter((entry) => {
-      if (entry.type !== 'File') return false;
-      if (entry.path.split('/').includes('__MACOSX')) return false;
-      return SUPPORTED_EXTENSIONS.has(path.extname(entry.path).toLowerCase());
-    })
-    .sort((a, b) => naturalCollator.compare(a.path, b.path));
-
-  if (entries.length === 0) {
-    throw new Error('The ZIP contains no PNG, JPG, JPEG, or WebP images.');
-  }
-  if (entries.length > MAX_FRAMES) {
-    throw new Error(`The ZIP contains ${entries.length.toLocaleString()} images. The current safety limit is ${MAX_FRAMES.toLocaleString()} frames.`);
-  }
-
-  const jobId = randomUUID();
-  const jobDir = path.join(jobsRoot, jobId);
-  const frameDir = path.join(jobDir, 'frames');
-  await mkdir(frameDir, {recursive: true});
+  const archive = await yauzl.openPromise(zipPath, {
+    autoClose: false,
+    validateEntrySizes: true,
+    strictFileNames: false,
+  });
 
   try {
-    const frameFiles = [];
-    const originalNames = [];
+    const entries = [];
+    let totalUncompressedBytes = 0;
 
-    for (let index = 0; index < entries.length; index++) {
-      const entry = entries[index];
-      const extension = path.extname(entry.path).toLowerCase();
-      const frameFile = `frame-${String(index + 1).padStart(8, '0')}${extension}`;
-      await pipeline(entry.stream(), createWriteStream(path.join(frameDir, frameFile)));
-      frameFiles.push(frameFile);
-      originalNames.push(entry.path);
+    for await (const entry of archive.eachEntry()) {
+      if (entry.fileName.endsWith('/')) continue;
+      if (entry.fileName.split('/').includes('__MACOSX')) continue;
+      if (!SUPPORTED_EXTENSIONS.has(path.extname(entry.fileName).toLowerCase())) continue;
+
+      totalUncompressedBytes += entry.uncompressedSize;
+      if (!Number.isSafeInteger(totalUncompressedBytes) || totalUncompressedBytes > MAX_UNCOMPRESSED_BYTES) {
+        throw new Error('The extracted image data exceeds the 32 GB desktop safety limit.');
+      }
+
+      entries.push(entry);
+      if (entries.length > MAX_FRAMES) {
+        throw new Error(`The ZIP contains more than ${MAX_FRAMES.toLocaleString()} supported image frames.`);
+      }
     }
 
-    const job = {id: jobId, dir: jobDir};
-    jobs.set(jobId, job);
-    return {
-      cancelled: false,
-      jobId,
-      zipName: path.basename(zipPath),
-      frameCount: frameFiles.length,
-      frames: frameFiles.map((file) => `${serverOrigin}/frames/${jobId}/frames/${encodeURIComponent(file)}`),
-      firstName: originalNames[0],
-      lastName: originalNames[originalNames.length - 1],
-    };
-  } catch (error) {
-    await rm(jobDir, {recursive: true, force: true});
-    throw error;
+    entries.sort((a, b) => naturalCollator.compare(a.fileName, b.fileName));
+
+    if (entries.length === 0) {
+      throw new Error('The ZIP contains no PNG, JPG, JPEG, or WebP images.');
+    }
+
+    const jobId = randomUUID();
+    const jobDir = path.join(jobsRoot, jobId);
+    const frameDir = path.join(jobDir, 'frames');
+    await mkdir(frameDir, {recursive: true});
+
+    try {
+      const frameFiles = [];
+      const originalNames = [];
+
+      for (let index = 0; index < entries.length; index++) {
+        const entry = entries[index];
+        const extension = path.extname(entry.fileName).toLowerCase();
+        const frameFile = `frame-${String(index + 1).padStart(8, '0')}${extension}`;
+        const readStream = await archive.openReadStreamPromise(entry);
+        await pipeline(readStream, createWriteStream(path.join(frameDir, frameFile)));
+        frameFiles.push(frameFile);
+        originalNames.push(entry.fileName);
+      }
+
+      const job = {id: jobId, dir: jobDir};
+      jobs.set(jobId, job);
+      return {
+        cancelled: false,
+        jobId,
+        zipName: path.basename(zipPath),
+        frameCount: frameFiles.length,
+        frames: frameFiles.map((file) => `${serverOrigin}/frames/${jobId}/frames/${encodeURIComponent(file)}`),
+        firstName: originalNames[0],
+        lastName: originalNames[originalNames.length - 1],
+      };
+    } catch (error) {
+      await rm(jobDir, {recursive: true, force: true});
+      throw error;
+    }
+  } finally {
+    archive.close();
   }
 };
 
